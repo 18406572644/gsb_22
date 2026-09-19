@@ -25,6 +25,9 @@ class TestClient {
   revision = 0
   pending: { opId: string; op: Op } | null = null
   inbox: ServerMsg[] = []
+  /** 模拟 collab.ts 的 lastSeq/checkSeq：记录广播序号空洞（误判即重同步风暴的源头） */
+  lastSeq = 0
+  seqGaps: string[] = []
   private waiters: { pred: (m: ServerMsg) => boolean; resolve: (m: ServerMsg) => void }[] = []
   private opCounter = 0
 
@@ -49,6 +52,7 @@ class TestClient {
   }
 
   private handle(msg: ServerMsg) {
+    this.trackSeq(msg)
     switch (msg.type) {
       case 'welcome': {
         const w = msg as WelcomeMsg
@@ -96,6 +100,19 @@ class TestClient {
         break
       }
     }
+  }
+
+  /** 与 collab.ts 一致：welcome/ops 的 seq 为同步游标直接对齐，其余广播必须连续 */
+  private trackSeq(msg: ServerMsg) {
+    if (!('seq' in msg) || typeof msg.seq !== 'number') return
+    if (msg.type === 'welcome' || msg.type === 'ops') {
+      this.lastSeq = msg.seq
+      return
+    }
+    if (msg.seq > this.lastSeq + 1) {
+      this.seqGaps.push(`期望 ${this.lastSeq + 1}，收到 ${msg.seq} (${msg.type})`)
+    }
+    if (msg.seq > this.lastSeq) this.lastSeq = msg.seq
   }
 
   open(): Promise<void> {
@@ -273,6 +290,49 @@ test('e2e: 断线重连 —— 增量补齐错过的操作', async () => {
 
   a.close()
   b2.close()
+})
+
+test('e2e: 私有重同步消息不消耗全局序号（其他客户端不误判消息丢失）', async () => {
+  const docId = 'e2e-private-resync-seq'
+  const a = new TestClient('A', 'editor', docId)
+  const b = new TestClient('B', 'editor', docId)
+  await a.join()
+  await b.join()
+
+  // 产生一条广播，推进全局序号
+  a.edit([{ insert: 'v1' }])
+  await a.waitFor((m) => m.type === 'ack')
+  await b.waitFor((m) => m.type === 'op')
+  const bSeq = b.lastSeq
+
+  // A 断线重连：增量 join，服务端下发的 welcome/ops 均为 A 的私信
+  a.close()
+  await new Promise((r) => setTimeout(r, 100))
+  const a2 = new TestClient('A2', 'editor', docId)
+  a2.doc = 'v1'
+  a2.revision = 1
+  await a2.join(1)
+  await a2.waitFor((m) => m.type === 'ops')
+
+  // A2 再主动请求一次重同步（ops 同样为私信）
+  a2.send({ type: 'resync', lastRevision: 1 })
+  await a2.waitFor(() => a2.inbox.filter((m) => m.type === 'ops').length === 2)
+
+  // 新广播：B 收到的序号必须恰好接续，不得出现空洞
+  a2.edit([{ retain: 2 }, { insert: '+v2' }])
+  const opMsg = (await b.waitFor((m) => m.type === 'op' && (m as { seq: number }).seq > bSeq)) as {
+    seq: number
+  }
+  assert.equal(opMsg.seq, bSeq + 1, '广播序号应连续：私有重同步消息不得消耗全局序号')
+
+  await new Promise((r) => setTimeout(r, 200))
+  assert.deepEqual(b.seqGaps, [], `B 不应检测到序号空洞: ${b.seqGaps}`)
+  assert.deepEqual(a2.seqGaps, [], `A2 不应检测到序号空洞: ${a2.seqGaps}`)
+  assert.equal(b.doc, 'v1+v2')
+  assert.equal(a2.doc, 'v1+v2')
+
+  a2.close()
+  b.close()
 })
 
 test('e2e: 版本过旧 —— 回退全量快照', async () => {

@@ -157,6 +157,10 @@ export interface OpsMsg {
   type: 'ops'
   ops: { revision: number; op: Op; opId: string; clientId: string; authorName: string }[]
   revision: number
+  /**
+   * 同步游标：服务端当前广播序号（本消息为单客户端私信，不消耗新序号）。
+   * 客户端据此对齐 lastSeq，仅对真实丢失的广播消息检测空洞。
+   */
   seq: number
 }
 

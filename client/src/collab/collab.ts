@@ -192,6 +192,7 @@ class Collab {
         // 增量补齐：重放错过的操作（含可能已收到的自己的操作，按 opId 去重）
         this.ot.resyncOps(msg.ops, msg.revision)
         doc.revision = this.ot.revision
+        // ops 为单客户端私信：seq 是同步游标（服务端当前广播序号），直接对齐
         this.lastSeq = msg.seq
         this.finishResync()
         break

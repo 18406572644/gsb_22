@@ -166,7 +166,8 @@ wss.on('connection', (ws: WebSocket) => {
               snapshot: false,
               seq: session.seq,
             } satisfies ServerMsg)
-            session.seq++
+            // ops 为单客户端私信：不消耗全局广播序号，仅携带当前序号作为同步游标，
+            // 否则其他客户端会在后续广播中检测到序号空洞而误触发重同步
             send({
               type: 'ops',
               ops: resync.ops.map((e) => ({
@@ -243,7 +244,7 @@ wss.on('connection', (ws: WebSocket) => {
           if (!session || !client) return
           const resync = session.buildResync(msg.lastRevision)
           if (resync.kind === 'ops') {
-            session.seq++
+            // 同 join 的增量路径：ops 是私信，seq 只作为同步游标，不递增全局序号
             send({
               type: 'ops',
               ops: resync.ops.map((e) => ({

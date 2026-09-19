@@ -36,7 +36,11 @@ export class DocSession {
   readonly docId: string
   doc: string
   revision = 0
-  /** 广播序号：客户端用它检测消息丢失（cursor/presence 等易失消息不计入） */
+  /**
+   * 广播序号：客户端用它检测消息丢失。
+   * 仅广播给全体客户端的消息（op / ack+op / ann:*）才递增；
+   * cursor/presence 等易失消息与 ops/welcome 等单客户端私信均不计入。
+   */
   seq = 0
   log: LogEntry[] = []
   annotations = new Map<string, Annotation>()
