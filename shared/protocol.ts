@@ -152,11 +152,13 @@ export interface WelcomeMsg {
   seq: number
 }
 
-/** 增量补齐：重连后补发错过的操作 */
+/** 增量补齐：重连后补发错过的操作（私有消息，只发给请求方） */
 export interface OpsMsg {
   type: 'ops'
   ops: { revision: number; op: Op; opId: string; clientId: string; authorName: string }[]
   revision: number
+  /** 同步游标：服务端当前全局广播序号的水位。私有补发不消耗新序号，
+   *  客户端据此对齐 lastSeq，使后续广播序号连续 */
   seq: number
 }
 

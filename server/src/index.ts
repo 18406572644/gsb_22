@@ -166,7 +166,8 @@ wss.on('connection', (ws: WebSocket) => {
               snapshot: false,
               seq: session.seq,
             } satisfies ServerMsg)
-            session.seq++
+            // 私有补发不消耗全局广播序号：ops 只发给当前客户端，
+            // 携带当前序号作为同步游标即可（递增会让其他客户端看到序号空洞）
             send({
               type: 'ops',
               ops: resync.ops.map((e) => ({
@@ -243,7 +244,7 @@ wss.on('connection', (ws: WebSocket) => {
           if (!session || !client) return
           const resync = session.buildResync(msg.lastRevision)
           if (resync.kind === 'ops') {
-            session.seq++
+            // 同上：私有补发只回传当前序号作为同步游标，不递增全局广播序号
             send({
               type: 'ops',
               ops: resync.ops.map((e) => ({

@@ -36,7 +36,12 @@ export class DocSession {
   readonly docId: string
   doc: string
   revision = 0
-  /** 广播序号：客户端用它检测消息丢失（cursor/presence 等易失消息不计入） */
+  /**
+   * 全局广播序号：客户端用它检测广播消息丢失（cursor/presence 等易失消息不计入）。
+   * 不变式：只有「送达全部客户端」的消息才允许递增（op 广播与发起者 ack 共用一次递增）；
+   * 面向单客户端的私有补发（ops）只读取当前值作为同步游标，禁止递增，
+   * 否则其他客户端会看到序号空洞，误判消息丢失而引发重同步风暴。
+   */
   seq = 0
   log: LogEntry[] = []
   annotations = new Map<string, Annotation>()

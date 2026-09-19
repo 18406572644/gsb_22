@@ -275,6 +275,39 @@ test('e2e: 断线重连 —— 增量补齐错过的操作', async () => {
   b2.close()
 })
 
+test('e2e: 私有重同步不消耗全局广播序号（其他客户端无序号空洞）', async () => {
+  const docId = 'e2e-private-seq'
+  const a = new TestClient('A', 'editor', docId)
+  const b = new TestClient('B', 'editor', docId)
+  await a.join()
+  await b.join()
+
+  // A 的编辑广播后，B 记下当前全局序号水位
+  a.edit([{ insert: 'abc' }])
+  const op1 = (await b.waitFor((m) => m.type === 'op')) as { seq: number }
+  const watermark = op1.seq
+
+  // C 增量加入：服务端只向 C 私有补发 ops；随后 C 再主动 resync 一次。
+  // 两条私有链路都不应消耗全局广播序号。
+  const c = new TestClient('C', 'editor', docId)
+  await c.join(0)
+  await c.waitFor((m) => m.type === 'ops')
+  c.send({ type: 'resync', lastRevision: 1 })
+  await c.waitFor((m) => m.type === 'ops' && m.ops.length === 0)
+
+  // A 再次编辑：B 收到的下一条广播序号必须紧接上一条，
+  // 否则 B 会检测到序号空洞并误触发重同步（多客户端同时重连时形成重同步风暴）
+  a.edit([{ retain: 3 }, { insert: 'd' }])
+  const op2 = (await b.waitFor(
+    (m) => m.type === 'op' && (m as { seq: number }).seq > watermark,
+  )) as { seq: number }
+  assert.equal(op2.seq, watermark + 1, '私有重同步不应消耗全局广播序号')
+
+  a.close()
+  b.close()
+  c.close()
+})
+
 test('e2e: 版本过旧 —— 回退全量快照', async () => {
   const docId = 'e2e-snapshot'
   const a = new TestClient('A', 'editor', docId)
